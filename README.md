@@ -29,9 +29,8 @@ USAGE
 <!-- usagestop -->
 # Commands
 <!-- commands -->
-* [`vibechecker hello PERSON`](#vibechecker-hello-person)
-* [`vibechecker hello world`](#vibechecker-hello-world)
 * [`vibechecker help [COMMAND]`](#vibechecker-help-command)
+* [`vibechecker login`](#vibechecker-login)
 * [`vibechecker plugins`](#vibechecker-plugins)
 * [`vibechecker plugins add PLUGIN`](#vibechecker-plugins-add-plugin)
 * [`vibechecker plugins:inspect PLUGIN...`](#vibechecker-pluginsinspect-plugin)
@@ -42,48 +41,6 @@ USAGE
 * [`vibechecker plugins uninstall [PLUGIN]`](#vibechecker-plugins-uninstall-plugin)
 * [`vibechecker plugins unlink [PLUGIN]`](#vibechecker-plugins-unlink-plugin)
 * [`vibechecker plugins update`](#vibechecker-plugins-update)
-
-## `vibechecker hello PERSON`
-
-Say hello
-
-```
-USAGE
-  $ vibechecker hello PERSON -f <value>
-
-ARGUMENTS
-  PERSON  Person to say hello to
-
-FLAGS
-  -f, --from=<value>  (required) Who is saying hello
-
-DESCRIPTION
-  Say hello
-
-EXAMPLES
-  $ vibechecker hello friend --from oclif
-  hello friend from oclif! (./src/commands/hello/index.ts)
-```
-
-_See code: [src/commands/hello/index.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/hello/index.ts)_
-
-## `vibechecker hello world`
-
-Say hello world
-
-```
-USAGE
-  $ vibechecker hello world
-
-DESCRIPTION
-  Say hello world
-
-EXAMPLES
-  $ vibechecker hello world
-  hello world! (./src/commands/hello/world.ts)
-```
-
-_See code: [src/commands/hello/world.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/hello/world.ts)_
 
 ## `vibechecker help [COMMAND]`
 
@@ -104,6 +61,26 @@ DESCRIPTION
 ```
 
 _See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/6.2.52/src/commands/help.ts)_
+
+## `vibechecker login`
+
+Log in to Vibe Checker and store an authenticated session.
+
+```
+USAGE
+  $ vibechecker login [-u <value>]
+
+FLAGS
+  -u, --username=<value>  Username or email (skips the prompt)
+
+DESCRIPTION
+  Log in to Vibe Checker and store an authenticated session.
+
+EXAMPLES
+  $ vibechecker login
+```
+
+_See code: [src/commands/login.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/login.ts)_
 
 ## `vibechecker plugins`
 

@@ -1,1 +1,1 @@
-{"root":["./src/index.ts","./src/commands/hello/index.ts","./src/commands/hello/world.ts"],"version":"5.9.3"}
+{"root":["./src/index.ts","./src/commands/login.ts","./src/lib/api.ts","./src/lib/config.ts","./src/lib/credentials.ts"],"version":"5.9.3"}
