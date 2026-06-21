@@ -11,7 +11,8 @@
     "@inquirer/prompts": "^7",
     "@oclif/core": "^4",
     "@oclif/plugin-help": "^6",
-    "@oclif/plugin-plugins": "^5"
+    "@oclif/plugin-plugins": "^5",
+    "@opencode-ai/sdk": "^1.17.9"
   },
   "devDependencies": {
     "@eslint/compat": "^1",

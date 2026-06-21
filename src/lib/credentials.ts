@@ -8,6 +8,38 @@ export interface Credentials {
   refresh_token: string
 }
 
+const PROVIDER_KEYS_FILE = 'provider-keys.json'
+
+function providerKeysPath(configDir: string): string {
+  return join(configDir, PROVIDER_KEYS_FILE)
+}
+
+/** Persist an API key for a provider in the oclif config dir at 0600. */
+export async function saveProviderKey(configDir: string, providerID: string, apiKey: string): Promise<void> {
+  await mkdir(configDir, {mode: 0o700, recursive: true})
+  const file = providerKeysPath(configDir)
+  let existing: Record<string, string> = {}
+  try {
+    existing = JSON.parse(await readFile(file, 'utf8')) as Record<string, string>
+  } catch {
+    // first write
+  }
+
+  existing[providerID] = apiKey
+  await writeFile(file, JSON.stringify(existing, null, 2), {mode: 0o600})
+  await chmod(file, 0o600)
+}
+
+/** Load a stored API key for a provider, or null if not set. */
+export async function loadProviderKey(configDir: string, providerID: string): Promise<null | string> {
+  try {
+    const keys = JSON.parse(await readFile(providerKeysPath(configDir), 'utf8')) as Record<string, string>
+    return keys[providerID] ?? null
+  } catch {
+    return null
+  }
+}
+
 const FILE_NAME = 'credentials.json'
 
 function credentialsPath(configDir: string): string {

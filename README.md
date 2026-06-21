@@ -9,6 +9,13 @@ Vibe Checker CLI
 [![Downloads/week](https://img.shields.io/npm/dw/vibechecker.svg)](https://npmjs.org/package/vibechecker)
 
 
+## Prerequisites
+
+- **`vibechecker login`** before `map` — the CLI stores your session and calls the API with it.
+- **`map` requires [OpenCode](https://opencode.ai)** to be installed and authenticated with a model provider (e.g. `opencode auth login`, or a provider key in your environment). `map` starts an in-process OpenCode server to crawl your codebase.
+- Set `VIBECHECKER_BASEURL` (e.g. `http://localhost:8000`) to point the CLI at a local API during development; it defaults to the production API otherwise.
+
+
 <!-- toc -->
 * [Usage](#usage)
 * [Commands](#commands)
@@ -31,6 +38,7 @@ USAGE
 <!-- commands -->
 * [`vibechecker help [COMMAND]`](#vibechecker-help-command)
 * [`vibechecker login`](#vibechecker-login)
+* [`vibechecker map`](#vibechecker-map)
 * [`vibechecker plugins`](#vibechecker-plugins)
 * [`vibechecker plugins add PLUGIN`](#vibechecker-plugins-add-plugin)
 * [`vibechecker plugins:inspect PLUGIN...`](#vibechecker-pluginsinspect-plugin)
@@ -81,6 +89,29 @@ EXAMPLES
 ```
 
 _See code: [src/commands/login.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/login.ts)_
+
+## `vibechecker map`
+
+Crawl the current project with OpenCode and map it into a Vibe Checker project (modules + functions).
+
+```
+USAGE
+  $ vibechecker map [-m <value>] [-p <value>]
+
+FLAGS
+  -m, --model=<value>    OpenCode model as provider/model (overrides the pinned model)
+  -p, --project=<value>  Project id to map into (skips the first-run prompt)
+
+DESCRIPTION
+  Crawl the current project with OpenCode and map it into a Vibe Checker project (modules + functions).
+
+EXAMPLES
+  $ vibechecker map
+
+  $ vibechecker map --model anthropic/claude-sonnet-4-5
+```
+
+_See code: [src/commands/map.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/map.ts)_
 
 ## `vibechecker plugins`
 

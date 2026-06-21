@@ -1,5 +1,9 @@
 /* eslint-disable camelcase -- request/response fields mirror the API's snake_case JSON contract */
 /* eslint-disable n/no-unsupported-features/node-builtins -- fetch/Response are available in our Node 18+ runtime */
+import type {MapModule} from './opencode.js'
+
+import {loadCredentials, saveCredentials} from './credentials.js'
+
 export interface TokenResponse {
   access_token: string
   expires_in: number
@@ -7,21 +11,43 @@ export interface TokenResponse {
   token_type: string
 }
 
+export interface Project {
+  _id: string
+  description?: string
+  name: string
+}
+
+export interface ImportMapSummary {
+  created_functions: number
+  created_modules: number
+  modules: Array<{functions: Array<{function_doc_id: string; name: string}>; module_id: string; name: string}>
+  updated_functions: number
+  updated_modules: number
+}
+
+interface RequestOptions {
+  body?: unknown
+  method?: string
+  token?: string
+}
+
 /**
- * POST JSON to the API as a CLI client. The X-Client-Type header tells the API
- * to return tokens in the response body instead of HTTP-only cookies. Throws an
- * Error carrying the API's `detail` message on a non-2xx response.
+ * Send a JSON request to the API as a CLI client. The X-Client-Type header tells the
+ * API to treat us as a non-browser client. A bearer token, when supplied, authenticates
+ * the request. Throws an Error carrying the API's `detail` message on a non-2xx response.
  */
-async function postJson<T>(baseUrl: string, path: string, body: unknown): Promise<T> {
+async function request<T>(baseUrl: string, path: string, options: RequestOptions = {}): Promise<T> {
+  const {body, method = 'GET', token} = options
+  const headers: Record<string, string> = {'X-Client-Type': 'cli'}
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (token) headers.Authorization = `Bearer ${token}`
+
   let response: Response
   try {
     response = await fetch(`${baseUrl}${path}`, {
-      body: JSON.stringify(body),
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Client-Type': 'cli',
-      },
-      method: 'POST',
+      body: body === undefined ? undefined : JSON.stringify(body),
+      headers,
+      method,
     })
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
@@ -40,13 +66,75 @@ async function postJson<T>(baseUrl: string, path: string, body: unknown): Promis
 
 /** Authenticate with a username/email + password and receive a token pair. */
 export async function signin(baseUrl: string, identifier: string, password: string): Promise<TokenResponse> {
-  return postJson<TokenResponse>(baseUrl, '/authenticate-signin', {
-    password,
-    user_identifier: identifier,
+  return request<TokenResponse>(baseUrl, '/authenticate-signin', {
+    body: {password, user_identifier: identifier},
+    method: 'POST',
   })
 }
 
 /** Exchange a refresh token for a fresh token pair (the old one is rotated out). */
 export async function refresh(baseUrl: string, refreshToken: string): Promise<TokenResponse> {
-  return postJson<TokenResponse>(baseUrl, '/refresh', {refresh_token: refreshToken})
+  return request<TokenResponse>(baseUrl, '/refresh', {body: {refresh_token: refreshToken}, method: 'POST'})
+}
+
+const REFRESH_SKEW_MS = 30_000
+
+/**
+ * Return a valid access token for authenticated calls, transparently rotating it via the
+ * stored refresh token when it has expired (or is about to). Throws with a login hint if
+ * the user is not logged in or the session can no longer be refreshed.
+ */
+export async function ensureAccessToken(baseUrl: string, configDir: string): Promise<string> {
+  const creds = await loadCredentials(configDir)
+  if (!creds) throw new Error('Not logged in. Run `vibechecker login` first.')
+
+  if (Date.now() < creds.expires_at - REFRESH_SKEW_MS) return creds.access_token
+
+  try {
+    const tokens = await refresh(baseUrl, creds.refresh_token)
+    await saveCredentials(configDir, {
+      access_token: tokens.access_token,
+      expires_at: Date.now() + tokens.expires_in * 1000,
+      refresh_token: tokens.refresh_token,
+    })
+    return tokens.access_token
+  } catch {
+    throw new Error('Your session has expired. Run `vibechecker login` again.')
+  }
+}
+
+/** List the authenticated user's projects. */
+export async function listProjects(baseUrl: string, configDir: string): Promise<Project[]> {
+  const token = await ensureAccessToken(baseUrl, configDir)
+  return request<Project[]>(baseUrl, '/projects', {token})
+}
+
+/** Create a new project and return its id. */
+export async function createProject(
+  baseUrl: string,
+  configDir: string,
+  name: string,
+  description: string,
+): Promise<{project_id: string}> {
+  const token = await ensureAccessToken(baseUrl, configDir)
+  return request<{project_id: string}>(baseUrl, '/create-project', {
+    body: {project_description: description, project_name: name},
+    method: 'POST',
+    token,
+  })
+}
+
+/** Merge a crawled module/function map into an existing project. */
+export async function importMap(
+  baseUrl: string,
+  configDir: string,
+  projectId: string,
+  modules: MapModule[],
+): Promise<ImportMapSummary> {
+  const token = await ensureAccessToken(baseUrl, configDir)
+  return request<ImportMapSummary>(baseUrl, '/project/map', {
+    body: {modules, project_id: projectId},
+    method: 'POST',
+    token,
+  })
 }
