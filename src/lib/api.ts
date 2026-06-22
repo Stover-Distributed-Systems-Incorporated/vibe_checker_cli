@@ -1,5 +1,8 @@
 /* eslint-disable camelcase -- request/response fields mirror the API's snake_case JSON contract */
 /* eslint-disable n/no-unsupported-features/node-builtins -- fetch/Response are available in our Node 18+ runtime */
+import {mkdir, open, rm, stat} from 'node:fs/promises'
+import {join} from 'node:path'
+
 import type {MapModule} from './opencode.js'
 
 import {loadCredentials, saveCredentials} from './credentials.js'
@@ -79,16 +82,84 @@ export async function signin(baseUrl: string, identifier: string, password: stri
 }
 
 /** Exchange a refresh token for a fresh token pair (the old one is rotated out). */
-export async function refresh(baseUrl: string, refreshToken: string): Promise<TokenResponse> {
+async function refresh(baseUrl: string, refreshToken: string): Promise<TokenResponse> {
   return request<TokenResponse>(baseUrl, '/refresh', {body: {refresh_token: refreshToken}, method: 'POST'})
 }
 
+/**
+ * Revoke session(s) server-side. The refresh token identifies the session. `scope`
+ * controls how much is revoked: 'all' deletes every refresh token for the user
+ * (logs out all devices), 'current' deletes only this session.
+ */
+export async function logoutSession(
+  baseUrl: string,
+  refreshToken: string,
+  scope: 'all' | 'current' = 'all',
+): Promise<void> {
+  await request<{message: string}>(baseUrl, '/logout', {
+    body: {refresh_token: refreshToken, scope},
+    method: 'POST',
+  })
+}
+
+// --- Concurrent-safe token refresh ---
+
 const REFRESH_SKEW_MS = 30_000
+const LOCK_FILE = '.refresh.lock'
+const LOCK_TTL_MS = 5_000   // a lock older than this is considered stale
+const LOCK_WAIT_MS = 3_000  // how long we'll wait before giving up on the lock
+const LOCK_POLL_MS = 100
+
+/**
+ * Run `fn` while holding a per-configDir file lock, preventing two concurrent
+ * CLI processes from both trying to rotate the same refresh token.
+ */
+async function withRefreshLock<T>(configDir: string, fn: () => Promise<T>): Promise<T> {
+  // When credentials live in the OS keychain the config dir may never have been
+  // created, so ensure it exists before we try to open a lock file inside it —
+  // otherwise the atomic open below fails with ENOENT instead of EEXIST.
+  await mkdir(configDir, {mode: 0o700, recursive: true})
+
+  const lockPath = join(configDir, LOCK_FILE)
+  const deadline = Date.now() + LOCK_WAIT_MS
+
+  for (;;) {
+    try {
+      // 'wx' = O_WRONLY | O_CREAT | O_EXCL — atomic, fails if the file already exists.
+      const fd = await open(lockPath, 'wx', 0o600)
+      try {
+        return await fn()
+      } finally {
+        await fd.close()
+        await rm(lockPath, {force: true})
+      }
+    } catch (err: unknown) {
+      const code = err instanceof Object && 'code' in err ? (err as NodeJS.ErrnoException).code : undefined
+      if (code !== 'EEXIST') throw err
+
+      // Lock file exists — clear it if stale so we don't deadlock after a crash.
+      try {
+        const s = await stat(lockPath)
+        if (Date.now() - s.mtimeMs > LOCK_TTL_MS) {
+          await rm(lockPath, {force: true})
+          continue
+        }
+      } catch { /* lock was removed between our check and stat; retry */ }
+
+      if (Date.now() > deadline) {
+        throw new Error('Token refresh lock timed out — another process may be hung.')
+      }
+
+      await new Promise<void>((resolve) => setTimeout(resolve, LOCK_POLL_MS))
+    }
+  }
+}
 
 /**
  * Return a valid access token for authenticated calls, transparently rotating it via the
- * stored refresh token when it has expired (or is about to). Throws with a login hint if
- * the user is not logged in or the session can no longer be refreshed.
+ * stored refresh token when it has expired (or is about to). The refresh is protected by a
+ * file lock so two concurrent CLI invocations don't both try to rotate the same token.
+ * Throws with a login hint if the user is not logged in or the session can no longer be refreshed.
  */
 export async function ensureAccessToken(baseUrl: string, configDir: string): Promise<string> {
   const creds = await loadCredentials(configDir)
@@ -96,17 +167,25 @@ export async function ensureAccessToken(baseUrl: string, configDir: string): Pro
 
   if (Date.now() < creds.expires_at - REFRESH_SKEW_MS) return creds.access_token
 
-  try {
-    const tokens = await refresh(baseUrl, creds.refresh_token)
-    await saveCredentials(configDir, {
-      access_token: tokens.access_token,
-      expires_at: Date.now() + tokens.expires_in * 1000,
-      refresh_token: tokens.refresh_token,
-    })
-    return tokens.access_token
-  } catch {
-    throw new Error('Your session has expired. Run `vibechecker login` again.')
-  }
+  return withRefreshLock(configDir, async () => {
+    // Re-read after acquiring the lock — another process may have already refreshed.
+    const fresh = await loadCredentials(configDir)
+    if (fresh && Date.now() < fresh.expires_at - REFRESH_SKEW_MS) return fresh.access_token
+
+    const tokenSource = fresh ?? creds
+    try {
+      const tokens = await refresh(baseUrl, tokenSource.refresh_token)
+      await saveCredentials(configDir, {
+        access_token: tokens.access_token,
+        expires_at: Date.now() + tokens.expires_in * 1000,
+        refresh_token: tokens.refresh_token,
+      })
+      return tokens.access_token
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      throw new Error(`Session refresh failed (${reason}). Run \`vibechecker login\` again.`)
+    }
+  })
 }
 
 /** List the authenticated user's projects. */
@@ -178,5 +257,3 @@ export async function mapFiles(
     token,
   })
 }
-
-

@@ -38,7 +38,8 @@ USAGE
 <!-- commands -->
 * [`vibechecker help [COMMAND]`](#vibechecker-help-command)
 * [`vibechecker login`](#vibechecker-login)
-* [`vibechecker map`](#vibechecker-map)
+* [`vibechecker logout`](#vibechecker-logout)
+* [`vibechecker map [FILE]`](#vibechecker-map-file)
 * [`vibechecker plugins`](#vibechecker-plugins)
 * [`vibechecker plugins add PLUGIN`](#vibechecker-plugins-add-plugin)
 * [`vibechecker plugins:inspect PLUGIN...`](#vibechecker-pluginsinspect-plugin)
@@ -76,10 +77,7 @@ Log in to Vibe Checker and store an authenticated session.
 
 ```
 USAGE
-  $ vibechecker login [-u <value>]
-
-FLAGS
-  -u, --username=<value>  Username or email (skips the prompt)
+  $ vibechecker login
 
 DESCRIPTION
   Log in to Vibe Checker and store an authenticated session.
@@ -90,24 +88,52 @@ EXAMPLES
 
 _See code: [src/commands/login.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/login.ts)_
 
-## `vibechecker map`
+## `vibechecker logout`
 
-Map a file or directory into a Vibe Checker project. With no path, OpenCode quickly selects the important files from a locally filtered project manifest.
+Log out and revoke your session(s) on the server.
 
 ```
 USAGE
-  $ vibechecker map [<file>] [-p <value>]
+  $ vibechecker logout [--all | --this-device]
+
+FLAGS
+  --all          Revoke every session (log out of all devices)
+  --this-device  Revoke only the current session
+
+DESCRIPTION
+  Log out and revoke your session(s) on the server.
+
+EXAMPLES
+  $ vibechecker logout
+
+  $ vibechecker logout --all
+
+  $ vibechecker logout --this-device
+```
+
+_See code: [src/commands/logout.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/logout.ts)_
+
+## `vibechecker map [FILE]`
+
+Map a source file or directory — or use OpenCode to quickly select the current project’s important source files.
+
+```
+USAGE
+  $ vibechecker map [FILE] [-p <value>]
+
+ARGUMENTS
+  [FILE]  Path to a source file, or a directory to map recursively
 
 FLAGS
   -p, --project=<value>  Project id to map into (skips the first-run prompt)
 
 DESCRIPTION
-Map a source file or directory. With no path, locally discover eligible project source files, then make one tool-free OpenCode request to select the most important files. Git-ignored files, dependencies, build output, hidden files, lockfiles, binaries, and unsupported file types are excluded before selection.
+  Map a source file or directory — or use OpenCode to quickly select the current project’s important source files.
 
 EXAMPLES
-  $ vibechecker map
+  $ vibechecker map <file-path>
 
-  $ vibechecker map src
+  $ vibechecker map
 ```
 
 _See code: [src/commands/map.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/map.ts)_

@@ -12,7 +12,8 @@
     "@oclif/core": "^4",
     "@oclif/plugin-help": "^6",
     "@oclif/plugin-plugins": "^5",
-    "@opencode-ai/sdk": "^1.17.9"
+    "@opencode-ai/sdk": "^1.17.9",
+    "keytar": "^7.9.0"
   },
   "devDependencies": {
     "@eslint/compat": "^1",
