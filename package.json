@@ -1,5 +1,5 @@
 {
-  "name": "vibechecker",
+  "name": "@stover-distributed-systems/vibechecker",
   "description": "Map your codebase into a structured module and function graph with OpenCode, then sync it to Vibe Checker.",
   "version": "0.1.0",
   "author": "Tayven Stover <tayvenstover@gmail.com>",
@@ -52,6 +52,9 @@
   "license": "MIT",
   "main": "dist/index.js",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "oclif": {
     "bin": "vibechecker",
     "dirname": "vibechecker",
