@@ -1,1 +1,1 @@
-{"root":["./src/index.ts","./src/commands/login.ts","./src/commands/map.ts","./src/lib/api.ts","./src/lib/config.ts","./src/lib/credentials.ts","./src/lib/opencode.ts","./src/lib/vibeconfig.ts"],"version":"5.9.3"}
+{"root":["./src/index.ts","./src/commands/login.ts","./src/commands/map.ts","./src/lib/api.ts","./src/lib/config.ts","./src/lib/credentials.ts","./src/lib/files.ts","./src/lib/opencode.ts","./src/lib/vibeconfig.ts"],"version":"5.9.3"}
