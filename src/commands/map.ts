@@ -1,39 +1,57 @@
-import {input, password, select} from '@inquirer/prompts'
-import {Command, Flags} from '@oclif/core'
+import {input, select} from '@inquirer/prompts'
+import {Args, Command, Flags} from '@oclif/core'
+import {existsSync} from 'node:fs'
+import {readFile} from 'node:fs/promises'
+import {resolve} from 'node:path'
 
-import {createProject, ensureAccessToken, importMap, listProjects} from '../lib/api.js'
+import {createProject, ensureAccessToken, listProjects, mapFile} from '../lib/api.js'
 import {getBaseUrl} from '../lib/config.js'
-import {loadProviderKey, saveProviderKey} from '../lib/credentials.js'
-import {crawlProject, listProviders} from '../lib/opencode.js'
 import {findVibeConfig, readVibeConfig, writeVibeConfig} from '../lib/vibeconfig.js'
 
 export default class Map extends Command {
-  static description =
-    'Crawl the current project with OpenCode and map it into a Vibe Checker project (modules + functions).'
-  static examples = ['<%= config.bin %> <%= command.id %>']
-  static flags = {
-    model: Flags.string({char: 'm', description: 'Model ID to use (skips the model prompt)'}),
+  static args = {
+    file: Args.string({description: 'Path to the source file to map', required: false}),
+  }
+  static description = 'Map a single source file into a Vibe Checker module (functions + flow).'
+static examples = ['<%= config.bin %> <%= command.id %> <file-path>']
+static flags = {
     project: Flags.string({char: 'p', description: 'Project id to map into (skips the first-run prompt)'}),
-    provider: Flags.string({description: 'Provider ID to use (skips the provider prompt)'}),
-    verbose: Flags.boolean({char: 'v', default: false, description: 'Stream live OpenCode events and detailed errors'}),
   }
 
   async run(): Promise<void> {
-    const {flags} = await this.parse(Map)
+    const {args, flags} = await this.parse(Map)
+    const {file} = args
+
+    if (!file) {
+      // "make it so that the map function does essentially nothing without a specified file"
+      return
+    }
+
     const baseUrl = getBaseUrl()
     const {configDir} = this.config
 
-    // Fail fast before the (potentially long) crawl if the user isn't authenticated.
+    // Fail fast if the user isn't authenticated.
     try {
       await ensureAccessToken(baseUrl, configDir)
     } catch (error) {
       this.error(error instanceof Error ? error.message : 'Authentication required.')
     }
 
+    // Check if the file exists locally and read its contents.
+    const filePath = resolve(process.cwd(), file)
+    if (!existsSync(filePath)) {
+      this.error(`File not found: ${file}`)
+    }
+
+    let fileContent: string
+    try {
+      fileContent = await readFile(filePath, 'utf8')
+    } catch (error) {
+      this.error(`Could not read file: ${error instanceof Error ? error.message : String(error)}`)
+    }
+
     let projectId: string
     let projectName: string
-    let providerId: string
-    let model: string
     let rootDir: string
 
     const existingPath = findVibeConfig(process.cwd())
@@ -41,22 +59,19 @@ export default class Map extends Command {
       const config = await readVibeConfig(existingPath)
       projectId = config.projectId
       projectName = config.projectName
-      providerId = flags.provider ?? config.providerId
-      model = flags.model ?? config.model
       rootDir = config.rootDir
     } else {
-      // First run: resolve project, provider, API key, and model interactively.
+      // First run: resolve project.
       rootDir = process.cwd()
       const resolved = await this.resolveProject(baseUrl, configDir, flags.project)
       projectId = resolved.projectId
       projectName = resolved.projectName
-      ;({model, providerId} = await this.resolveProviderAndModel(configDir, flags.provider, flags.model))
 
       const written = await writeVibeConfig(rootDir, {
-        model,
+        model: 'none',
         projectId,
         projectName,
-        providerId,
+        providerId: 'none',
         rootDir,
         updatedAt: new Date().toISOString(),
         version: 1,
@@ -64,42 +79,28 @@ export default class Map extends Command {
       this.log(`Saved project settings to ${written}.`)
     }
 
-    // Load the stored key for this provider (prompted during first run, saved there).
-    const apiKey = await loadProviderKey(configDir, providerId)
-    if (!apiKey) {
-      this.error(`No API key found for provider "${providerId}". Delete .vibe-checker and run map again to re-configure.`)
-    }
-
-    this.log(`Crawling ${rootDir} with ${providerId}/${model} — this can take a few minutes…`)
-    let map
+    this.log(`Mapping "${file}" into project "${projectName}" — analyzing with LLM…`)
     try {
-      map = await crawlProject(
-        rootDir,
-        {apiKey, modelID: model, providerID: providerId},
-        {log: (message) => this.logToStderr(message), verbose: flags.verbose},
-      )
-    } catch (error) {
-      this.error(error instanceof Error ? error.message : 'OpenCode crawl failed.')
-    }
-
-    this.log(`Mapped ${map.modules.length} module(s). Importing into "${projectName}"…`)
-    try {
-      const summary = await importMap(baseUrl, configDir, projectId, map.modules)
+      const summary = await mapFile(baseUrl, configDir, {
+        fileContent,
+        fileName: file,
+        projectId,
+      })
       this.log(
         `Done. Modules: +${summary.created_modules} new, ${summary.updated_modules} updated. ` +
           `Functions: +${summary.created_functions} new, ${summary.updated_functions} updated.`,
       )
     } catch (error) {
-      this.error(error instanceof Error ? error.message : 'Import failed.')
+      this.error(error instanceof Error ? error.message : 'Mapping failed.')
     }
 
     // Refresh the timestamp on a subsequent run.
     if (existingPath) {
       await writeVibeConfig(rootDir, {
-        model,
+        model: 'none',
         projectId,
         projectName,
-        providerId,
+        providerId: 'none',
         rootDir,
         updatedAt: new Date().toISOString(),
         version: 1,
@@ -139,48 +140,5 @@ export default class Map extends Command {
     const desc = await input({message: 'Project description:'})
     const {project_id: newId} = await createProject(baseUrl, configDir, name, desc)
     return {projectId: newId, projectName: name}
-  }
-
-  /** Prompt for provider → API key → model. Saves the key to the config dir. */
-  private async resolveProviderAndModel(
-    configDir: string,
-    providerFlag?: string,
-    modelFlag?: string,
-  ): Promise<{model: string; providerId: string}> {
-    // Ask for the provider ID first so we can spin up OpenCode with the right key.
-    const providerId =
-      providerFlag ??
-      (await input({
-        message: 'Provider ID (e.g. anthropic, openai, google):',
-      }))
-
-    const apiKey = await password({mask: true, message: `API key for ${providerId}:`})
-
-    // Fetch that provider's model list from OpenCode.
-    this.log('Fetching available models…')
-    let providers
-    try {
-      providers = await listProviders(providerId, apiKey)
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
-      this.error(`Could not fetch model list: ${reason}`)
-    }
-
-    const provider = providers.find((p) => p.id === providerId)
-    if (!provider || provider.models.length === 0) {
-      this.error(`No models found for provider "${providerId}". Check your provider ID and API key.`)
-    }
-
-    const modelId =
-      modelFlag ??
-      (await select({
-        choices: provider.models.map((m) => ({name: `${m.name} (${m.id})`, value: m.id})),
-        message: `Select a model for ${provider.name}:`,
-      }))
-
-    // Persist the key so re-runs don't prompt again.
-    await saveProviderKey(configDir, providerId, apiKey)
-
-    return {model: modelId, providerId}
   }
 }

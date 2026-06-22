@@ -138,3 +138,22 @@ export async function importMap(
     token,
   })
 }
+
+export async function mapFile(
+  baseUrl: string,
+  configDir: string,
+  params: {fileContent: string; fileName: string; projectId: string},
+): Promise<ImportMapSummary> {
+  const token = await ensureAccessToken(baseUrl, configDir)
+  return request<ImportMapSummary>(baseUrl, '/project/map-file', {
+    body: {
+      file_content: params.fileContent,
+      file_name: params.fileName,
+      project_id: params.projectId,
+    },
+    method: 'POST',
+    token,
+  })
+}
+
+
