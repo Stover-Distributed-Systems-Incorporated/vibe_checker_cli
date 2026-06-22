@@ -5,8 +5,8 @@ Vibe Checker is a command-line tool that maps your codebase into a structured gr
 
 
 [![oclif](https://img.shields.io/badge/cli-oclif-brightgreen.svg)](https://oclif.io)
-[![Version](https://img.shields.io/npm/v/@stover-distributed-systems/vibechecker.svg)](https://npmjs.org/package/@stover-distributed-systems/vibechecker)
-[![Downloads/week](https://img.shields.io/npm/dw/@stover-distributed-systems/vibechecker.svg)](https://npmjs.org/package/@stover-distributed-systems/vibechecker)
+[![Version](https://img.shields.io/npm/v/@stover-distributed/vibechecker.svg)](https://npmjs.org/package/@stover-distributed/vibechecker)
+[![Downloads/week](https://img.shields.io/npm/dw/@stover-distributed/vibechecker.svg)](https://npmjs.org/package/@stover-distributed/vibechecker)
 
 
 ## Prerequisites
@@ -23,11 +23,11 @@ Vibe Checker is a command-line tool that maps your codebase into a structured gr
 # Usage
 <!-- usage -->
 ```sh-session
-$ npm install -g @stover-distributed-systems/vibechecker
+$ npm install -g @stover-distributed/vibechecker
 $ vibechecker COMMAND
 running command...
 $ vibechecker (--version)
-@stover-distributed-systems/vibechecker/0.1.0 darwin-arm64 node-v24.15.0
+@stover-distributed/vibechecker/0.1.0 darwin-arm64 node-v24.15.0
 $ vibechecker --help [COMMAND]
 USAGE
   $ vibechecker COMMAND

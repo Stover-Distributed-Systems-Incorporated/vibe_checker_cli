@@ -1,10 +1,10 @@
 {
-  "name": "@stover-distributed-systems/vibechecker",
+  "name": "@stover-distributed/vibechecker",
   "description": "Map your codebase into a structured module and function graph with OpenCode, then sync it to Vibe Checker.",
   "version": "0.1.0",
   "author": "Tayven Stover <tayvenstover@gmail.com>",
   "bin": {
-    "vibechecker": "./bin/run.js"
+    "vibechecker": "bin/run.js"
   },
   "bugs": "https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/issues",
   "dependencies": {
@@ -65,7 +65,10 @@
     ],
     "topicSeparator": " "
   },
-  "repository": "Stover-Distributed-Systems-Incorporated/vibe_checker_cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli.git"
+  },
   "scripts": {
     "build": "shx rm -rf dist && tsc -b",
     "lint": "eslint",
