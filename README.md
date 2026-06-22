@@ -12,7 +12,7 @@ Vibe Checker CLI
 ## Prerequisites
 
 - **`vibechecker login`** before `map` — the CLI stores your session and calls the API with it.
-- **`map` requires [OpenCode](https://opencode.ai)** to be installed and authenticated with a model provider (e.g. `opencode auth login`, or a provider key in your environment). `map` starts an in-process OpenCode server to crawl your codebase.
+- **`map` without a path uses OpenCode to select the most meaningful project files from a local source manifest.** The CLI applies Git ignore rules when available and excludes dependency, build, generated, hidden, lock, binary, oversized, and non-source files before OpenCode sees the candidate list. OpenCode gets no filesystem tools during selection, so it makes one fast model request rather than crawling the repository.
 - Set `VIBECHECKER_BASEURL` (e.g. `http://localhost:8000`) to point the CLI at a local API during development; it defaults to the production API otherwise.
 
 
@@ -92,23 +92,22 @@ _See code: [src/commands/login.ts](https://github.com/Stover-Distributed-Systems
 
 ## `vibechecker map`
 
-Crawl the current project with OpenCode and map it into a Vibe Checker project (modules + functions).
+Map a file or directory into a Vibe Checker project. With no path, OpenCode quickly selects the important files from a locally filtered project manifest.
 
 ```
 USAGE
-  $ vibechecker map [-m <value>] [-p <value>]
+  $ vibechecker map [<file>] [-p <value>]
 
 FLAGS
-  -m, --model=<value>    OpenCode model as provider/model (overrides the pinned model)
   -p, --project=<value>  Project id to map into (skips the first-run prompt)
 
 DESCRIPTION
-  Crawl the current project with OpenCode and map it into a Vibe Checker project (modules + functions).
+Map a source file or directory. With no path, locally discover eligible project source files, then make one tool-free OpenCode request to select the most important files. Git-ignored files, dependencies, build output, hidden files, lockfiles, binaries, and unsupported file types are excluded before selection.
 
 EXAMPLES
   $ vibechecker map
 
-  $ vibechecker map --model anthropic/claude-sonnet-4-5
+  $ vibechecker map src
 ```
 
 _See code: [src/commands/map.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/map.ts)_

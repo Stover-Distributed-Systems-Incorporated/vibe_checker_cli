@@ -3,6 +3,8 @@ import {open, stat, writeFile} from 'node:fs/promises'
 import {homedir} from 'node:os'
 import {join} from 'node:path'
 
+import type {SourceFileCandidate} from './files.js'
+
 export interface MapFunction {
   calls?: string[]
   description?: string
@@ -43,6 +45,10 @@ export interface EngineModel {
   providerID: string
 }
 
+export interface FileSelection {
+  files: string[]
+}
+
 type ToolPartLike = {callID: string; state: {error?: string; input?: unknown; status: string}; tool: string}
 
 // OpenCode writes its server log here; we tail it to explain a server-side crash.
@@ -66,6 +72,67 @@ Rules:
 Output ONLY a single JSON object — no prose, no markdown fences — in exactly this shape:
 {"project":{"name":"","description":""},"modules":[{"name":"","description":"","functions":[{"name":"","description":"","inputs":[],"outputs":[],"steps":[],"calls":[],"errors":[]}]}]}`
 
+const MAX_SELECTION_MANIFEST_BYTES = 64 * 1024
+
+/** Prefer likely application code if a very large repository needs a bounded manifest. */
+function candidatePriority(candidate: SourceFileCandidate): number {
+  const path = candidate.fileName.toLowerCase()
+  let score = 0
+  if (/(^|\/)(src|app|apps|api|server|client|lib|core|domain|feature|features|internal|cmd)(\/|$)/.test(path)) score += 100
+  if (/(^|\/)(index|main|server|app|cli|command)\.[cm]?[jt]sx?$/.test(path)) score += 50
+  if (/(^|\/)(test|tests|__tests__|spec|specs|fixtures|examples|demo)(\/|$)/.test(path)) score -= 30
+  return score
+}
+
+/**
+ * Give the model a compact, locally-filtered project manifest rather than an
+ * open-ended filesystem. That keeps selection to one model turn and makes the
+ * paths it can choose both predictable and safe.
+ */
+function buildFileSelectionPrompt(candidates: SourceFileCandidate[]): string {
+  const ranked = [...candidates].sort((a, b) => (
+    candidatePriority(b) - candidatePriority(a) || a.fileName.localeCompare(b.fileName)
+  ))
+  const paths: string[] = []
+  let bytes = 0
+  for (const candidate of ranked) {
+    const line = `${candidate.fileName} (${candidate.size} bytes)`
+    if (paths.length > 0 && bytes + line.length + 1 > MAX_SELECTION_MANIFEST_BYTES) break
+    paths.push(line)
+    bytes += line.length + 1
+  }
+
+  const omitted = candidates.length - paths.length
+  const truncation = omitted > 0
+    ? `\nThe manifest was capped for speed; ${omitted} lower-priority candidate paths were omitted.\n`
+    : ''
+
+  return `You are selecting the smallest useful set of files for understanding a software project.
+
+You have NO filesystem tools. Do not attempt to explore, search, or read the working directory. The candidate manifest below was generated locally: it contains only project source files and already excludes dependency directories, build output, hidden files, lockfiles, unsupported files, and files ignored by Git when this is a Git repository.
+
+Choose high-signal application entry points, feature code, domain logic, API handlers, and tests only when they materially explain behavior. Favor a useful representative set over exhaustive coverage. Select only exact paths from the manifest.${truncation}
+Candidate source manifest (${paths.length}/${candidates.length} paths):
+${paths.join('\n')}
+
+Output ONLY a single JSON object with this exact shape:
+{"files":["relative/path/to/source.ts"]}`
+}
+
+// Explicitly disable every filesystem and mutating tool used by the built-in
+// coding agent. The model's only input for this fast selection run is the
+// manifest above, so it has no reason to start an exploratory tool loop.
+const MANIFEST_ONLY_TOOLS = {
+  bash: false,
+  edit: false,
+  glob: false,
+  grep: false,
+  list: false,
+  patch: false,
+  read: false,
+  write: false,
+}
+
 type MessageError = {data?: Record<string, unknown>; name?: string}
 
 function buildServerConfig(providerID: string, apiKey: string, verbose: boolean) {
@@ -74,6 +141,47 @@ function buildServerConfig(providerID: string, apiKey: string, verbose: boolean)
   }
   if (verbose) config.logLevel = 'DEBUG'
   return config
+}
+
+/**
+ * Start an OpenCode instance owned by this CLI invocation. Port 0 asks the OS
+ * for a free loopback port, which keeps it isolated from a user's TUI, editor,
+ * or another VibeChecker run. The close hook is idempotent and is also wired to
+ * process exit, termination signals, and uncaught exceptions so this child
+ * process cannot linger after the CLI does.
+ */
+async function startManagedOpenCode(config: ReturnType<typeof buildServerConfig>) {
+  const {client, server} = await createOpencode({config, port: 0})
+  let closed = false
+
+  const close = () => {
+    if (closed) return
+    closed = true
+    process.off('exit', close)
+    process.off('SIGINT', onSigint)
+    process.off('SIGTERM', onSigterm)
+    process.off('uncaughtExceptionMonitor', close)
+    server.close()
+  }
+
+  // Restore Node's standard signal behavior after stopping our child process.
+  // Re-sending the signal after removing the listener exits with the expected
+  // signal status instead of leaving the CLI running after Ctrl+C.
+  const forwardSignal = (signal: NodeJS.Signals) => {
+    close()
+    process.kill(process.pid, signal)
+  }
+
+  const onSigint = () => forwardSignal('SIGINT')
+  const onSigterm = () => forwardSignal('SIGTERM')
+
+  process.once('exit', close)
+  process.once('SIGINT', onSigint)
+  process.once('SIGTERM', onSigterm)
+  // This monitor observes a crash without overriding Node's default crash exit.
+  process.once('uncaughtExceptionMonitor', close)
+
+  return {client, close, url: server.url}
 }
 
 /** Turn OpenCode's structured message error into an actionable, human-readable line. */
@@ -197,12 +305,38 @@ function parseMap(text: string): ProjectMap {
   return parsed
 }
 
+function parseFileSelection(text: string): FileSelection {
+  let raw = text.trim()
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fence) raw = fence[1].trim()
+  if (!raw.startsWith('{')) {
+    const start = raw.indexOf('{')
+    const end = raw.lastIndexOf('}')
+    if (start !== -1 && end > start) raw = raw.slice(start, end + 1)
+  }
+
+  const parsed = JSON.parse(raw) as {files?: unknown}
+  if (!Array.isArray(parsed?.files)) {
+    throw new TypeError('OpenCode output did not contain a "files" array.')
+  }
+
+  // A second local filter happens before any file is read. This only makes the
+  // model response predictable and rejects obvious paths outside the project.
+  const files = [...new Set(parsed.files.filter((file): file is string => (
+    typeof file === 'string' &&
+    file.length > 0 &&
+    !file.startsWith('/') &&
+    !file.split(/[\\/]/).includes('..')
+  )))]
+  return {files}
+}
+
 /**
  * Spin up an OpenCode server with the given provider API key, fetch the full provider
  * list, and return a simplified list of providers (name, id, models[]).
  */
 export async function listProviders(providerID: string, apiKey: string): Promise<ProviderInfo[]> {
-  const {client, server} = await createOpencode({config: buildServerConfig(providerID, apiKey, false)})
+  const {client, close} = await startManagedOpenCode(buildServerConfig(providerID, apiKey, false))
   try {
     const result = await client.provider.list()
     const all = result.data?.all ?? []
@@ -215,7 +349,57 @@ export async function listProviders(providerID: string, apiKey: string): Promise
       name: p.name,
     }))
   } finally {
-    server.close()
+    close()
+  }
+}
+
+/**
+ * Ask OpenCode to identify the project's meaningful source files. The returned
+ * paths are relative to rootDir and must still be validated by the caller before
+ * reading or uploading them.
+ */
+export async function selectProjectFiles(
+  rootDir: string,
+  model: EngineModel,
+  candidates: SourceFileCandidate[],
+  options: CrawlOptions = {},
+): Promise<FileSelection> {
+  const {apiKey, modelID, providerID} = model
+  const verbose = options.verbose ?? false
+  const log: Logger = options.log ?? (() => {})
+  const {client, close} = await startManagedOpenCode(buildServerConfig(providerID, apiKey, verbose))
+
+  try {
+    const created = await client.session.create({body: {title: 'vibechecker select files'}, query: {directory: rootDir}})
+    const session = created.data
+    if (!session) throw new Error('Failed to start an OpenCode session.')
+    if (verbose) log(`Session ${session.id} created; selecting project files…`)
+
+    const result = await client.session.prompt({
+      body: {
+        model: {modelID, providerID},
+        parts: [{text: buildFileSelectionPrompt(candidates), type: 'text'}],
+        // A single-turn selection must not turn into agent-driven code exploration.
+        tools: MANIFEST_ONLY_TOOLS,
+      },
+      path: {id: session.id},
+      query: {directory: rootDir},
+    })
+    const info = result.data?.info as undefined | {error?: MessageError}
+    if (info?.error) throw new Error(`OpenCode could not select files: ${describeMessageError(info.error)}`)
+
+    const text = (result.data?.parts ?? [])
+      .filter((part) => part.type === 'text')
+      .map((part) => (part as {text: string}).text)
+      .join('\n')
+      .trim()
+    if (!text) throw new Error('OpenCode returned no file selection. Verify the provider, API key, and model.')
+
+    return parseFileSelection(text)
+  } catch (error) {
+    throw new Error(`OpenCode file selection failed: ${formatError(error)}`)
+  } finally {
+    close()
   }
 }
 
@@ -230,8 +414,8 @@ export async function crawlProject(rootDir: string, model: EngineModel, options:
   const log: Logger = options.log ?? (() => {})
 
   const logOffset = verbose ? await logSize() : 0
-  const {client, server} = await createOpencode({config: buildServerConfig(providerID, apiKey, verbose)})
-  if (verbose) log(`OpenCode server listening on ${server.url}`)
+  const {client, close, url} = await startManagedOpenCode(buildServerConfig(providerID, apiKey, verbose))
+  if (verbose) log(`OpenCode server listening on ${url}`)
 
   // Subscribe to the event stream so we can narrate progress and capture the real failure.
   let capturedError: MessageError | undefined
@@ -313,7 +497,7 @@ export async function crawlProject(rootDir: string, model: EngineModel, options:
       throw new Error(`${formatError(error)} Raw OpenCode output saved to ${debugPath}.`)
     }
   } finally {
-    server.close()
+    close()
     await eventLoop.catch(() => {})
   }
 }
