@@ -1,18 +1,29 @@
 import {input, select} from '@inquirer/prompts'
 import {Args, Command, Flags} from '@oclif/core'
 import {existsSync} from 'node:fs'
-import {readFile} from 'node:fs/promises'
+import {readFile, stat} from 'node:fs/promises'
 import {resolve} from 'node:path'
 
-import {createProject, ensureAccessToken, listProjects, mapFile} from '../lib/api.js'
+import type {MapFilesSummary} from '../lib/api.js'
+
+import {createProject, ensureAccessToken, listProjects, mapFile, mapFiles} from '../lib/api.js'
 import {getBaseUrl} from '../lib/config.js'
+import {collectSourceFiles} from '../lib/files.js'
 import {findVibeConfig, readVibeConfig, writeVibeConfig} from '../lib/vibeconfig.js'
+
+/** The resolved auth/project context shared by both mapping paths. */
+interface MapContext {
+  baseUrl: string
+  configDir: string
+  projectId: string
+  projectName: string
+}
 
 export default class Map extends Command {
   static args = {
-    file: Args.string({description: 'Path to the source file to map', required: false}),
+    file: Args.string({description: 'Path to a source file, or a directory to map recursively', required: false}),
   }
-  static description = 'Map a single source file into a Vibe Checker module (functions + flow).'
+  static description = 'Map a source file — or an entire directory — into Vibe Checker modules (functions + flow).'
 static examples = ['<%= config.bin %> <%= command.id %> <file-path>']
 static flags = {
     project: Flags.string({char: 'p', description: 'Project id to map into (skips the first-run prompt)'}),
@@ -37,18 +48,13 @@ static flags = {
       this.error(error instanceof Error ? error.message : 'Authentication required.')
     }
 
-    // Check if the file exists locally and read its contents.
-    const filePath = resolve(process.cwd(), file)
-    if (!existsSync(filePath)) {
-      this.error(`File not found: ${file}`)
+    // Resolve the target locally — it may be a single file or a whole directory.
+    const targetPath = resolve(process.cwd(), file)
+    if (!existsSync(targetPath)) {
+      this.error(`Path not found: ${file}`)
     }
 
-    let fileContent: string
-    try {
-      fileContent = await readFile(filePath, 'utf8')
-    } catch (error) {
-      this.error(`Could not read file: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    const isDirectory = (await stat(targetPath)).isDirectory()
 
     let projectId: string
     let projectName: string
@@ -79,20 +85,8 @@ static flags = {
       this.log(`Saved project settings to ${written}.`)
     }
 
-    this.log(`Mapping "${file}" into project "${projectName}" — analyzing with LLM…`)
-    try {
-      const summary = await mapFile(baseUrl, configDir, {
-        fileContent,
-        fileName: file,
-        projectId,
-      })
-      this.log(
-        `Done. Modules: +${summary.created_modules} new, ${summary.updated_modules} updated. ` +
-          `Functions: +${summary.created_functions} new, ${summary.updated_functions} updated.`,
-      )
-    } catch (error) {
-      this.error(error instanceof Error ? error.message : 'Mapping failed.')
-    }
+    const ctx: MapContext = {baseUrl, configDir, projectId, projectName}
+    await (isDirectory ? this.mapDirectory(ctx, targetPath) : this.mapSingleFile(ctx, file, targetPath))
 
     // Refresh the timestamp on a subsequent run.
     if (existingPath) {
@@ -105,6 +99,60 @@ static flags = {
         updatedAt: new Date().toISOString(),
         version: 1,
       })
+    }
+  }
+
+  /** Collect, filter, and batch-map every source file under a directory. */
+  private async mapDirectory(ctx: MapContext, dirPath: string): Promise<void> {
+    const {files, skipped} = await collectSourceFiles(dirPath)
+    if (files.length === 0) {
+      this.error(`No mappable source files found under "${dirPath}".`)
+    }
+
+    this.log(
+      `Mapping ${files.length} file${files.length === 1 ? '' : 's'} into project "${ctx.projectName}" ` +
+        `(${skipped.length} skipped) — analyzing with LLM…`,
+    )
+
+    let summary: MapFilesSummary
+    try {
+      summary = await mapFiles(ctx.baseUrl, ctx.configDir, {files, projectId: ctx.projectId})
+    } catch (error) {
+      this.error(error instanceof Error ? error.message : 'Mapping failed.')
+    }
+
+    this.log(
+      `Done. Mapped ${summary.mapped_count}/${files.length} file${files.length === 1 ? '' : 's'}. ` +
+        `Modules: +${summary.created_modules} new, ${summary.updated_modules} updated. ` +
+        `Functions: +${summary.created_functions} new, ${summary.updated_functions} updated.`,
+    )
+
+    if (summary.failed_count > 0) {
+      this.log(`${summary.failed_count} file${summary.failed_count === 1 ? '' : 's'} failed to map:`)
+      for (const f of summary.failed) {
+        this.log(`  ✗ ${f.file_name}: ${f.error}`)
+      }
+    }
+  }
+
+  /** Read and map a single source file (the original one-file-per-call behavior). */
+  private async mapSingleFile(ctx: MapContext, fileName: string, filePath: string): Promise<void> {
+    let fileContent: string
+    try {
+      fileContent = await readFile(filePath, 'utf8')
+    } catch (error) {
+      this.error(`Could not read file: ${error instanceof Error ? error.message : String(error)}`)
+    }
+
+    this.log(`Mapping "${fileName}" into project "${ctx.projectName}" — analyzing with LLM…`)
+    try {
+      const summary = await mapFile(ctx.baseUrl, ctx.configDir, {fileContent, fileName, projectId: ctx.projectId})
+      this.log(
+        `Done. Modules: +${summary.created_modules} new, ${summary.updated_modules} updated. ` +
+          `Functions: +${summary.created_functions} new, ${summary.updated_functions} updated.`,
+      )
+    } catch (error) {
+      this.error(error instanceof Error ? error.message : 'Mapping failed.')
     }
   }
 

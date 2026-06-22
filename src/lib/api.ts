@@ -25,6 +25,12 @@ export interface ImportMapSummary {
   updated_modules: number
 }
 
+export interface MapFilesSummary extends ImportMapSummary {
+  failed: Array<{error: string; file_name: string}>
+  failed_count: number
+  mapped_count: number
+}
+
 interface RequestOptions {
   body?: unknown
   method?: string
@@ -149,6 +155,23 @@ export async function mapFile(
     body: {
       file_content: params.fileContent,
       file_name: params.fileName,
+      project_id: params.projectId,
+    },
+    method: 'POST',
+    token,
+  })
+}
+
+/** Map many files in one batch request. The server maps them concurrently and reports per-file failures. */
+export async function mapFiles(
+  baseUrl: string,
+  configDir: string,
+  params: {files: Array<{content: string; fileName: string}>; projectId: string},
+): Promise<MapFilesSummary> {
+  const token = await ensureAccessToken(baseUrl, configDir)
+  return request<MapFilesSummary>(baseUrl, '/project/map-files', {
+    body: {
+      files: params.files.map((f) => ({file_content: f.content, file_name: f.fileName})),
       project_id: params.projectId,
     },
     method: 'POST',
