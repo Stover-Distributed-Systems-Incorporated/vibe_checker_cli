@@ -1,8 +1,8 @@
 {
   "name": "vibechecker",
-  "description": "Vibe Checker CLI",
-  "version": "0.0.0",
-  "author": "Tayven Stover",
+  "description": "Map your codebase into a structured module and function graph with OpenCode, then sync it to Vibe Checker.",
+  "version": "0.1.0",
+  "author": "Tayven Stover <tayvenstover@gmail.com>",
   "bin": {
     "vibechecker": "./bin/run.js"
   },
@@ -42,7 +42,12 @@
   ],
   "homepage": "https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli",
   "keywords": [
-    "oclif"
+    "oclif",
+    "cli",
+    "opencode",
+    "code-mapping",
+    "codebase",
+    "vibe-checker"
   ],
   "license": "MIT",
   "main": "dist/index.js",

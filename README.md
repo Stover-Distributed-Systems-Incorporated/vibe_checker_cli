@@ -1,7 +1,7 @@
 vibechecker
 =================
 
-Vibe Checker CLI
+Vibe Checker is a command-line tool that maps your codebase into a structured graph of modules and functions. It uses [OpenCode](https://opencode.ai) to crawl your project and select its most meaningful source files, then syncs the resulting map to the Vibe Checker platform so you can explore and document how your code fits together.
 
 
 [![oclif](https://img.shields.io/badge/cli-oclif-brightgreen.svg)](https://oclif.io)
@@ -27,7 +27,7 @@ $ npm install -g vibechecker
 $ vibechecker COMMAND
 running command...
 $ vibechecker (--version)
-vibechecker/0.0.0 darwin-arm64 node-v24.15.0
+vibechecker/0.1.0 darwin-arm64 node-v24.15.0
 $ vibechecker --help [COMMAND]
 USAGE
   $ vibechecker COMMAND
@@ -36,6 +36,7 @@ USAGE
 <!-- usagestop -->
 # Commands
 <!-- commands -->
+* [`vibechecker credits`](#vibechecker-credits)
 * [`vibechecker help [COMMAND]`](#vibechecker-help-command)
 * [`vibechecker login`](#vibechecker-login)
 * [`vibechecker logout`](#vibechecker-logout)
@@ -50,6 +51,23 @@ USAGE
 * [`vibechecker plugins uninstall [PLUGIN]`](#vibechecker-plugins-uninstall-plugin)
 * [`vibechecker plugins unlink [PLUGIN]`](#vibechecker-plugins-unlink-plugin)
 * [`vibechecker plugins update`](#vibechecker-plugins-update)
+
+## `vibechecker credits`
+
+Show the open-source tools and dependencies that power VibeChecker.
+
+```
+USAGE
+  $ vibechecker credits
+
+DESCRIPTION
+  Show the open-source tools and dependencies that power VibeChecker.
+
+EXAMPLES
+  $ vibechecker credits
+```
+
+_See code: [src/commands/credits.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.1.0/src/commands/credits.ts)_
 
 ## `vibechecker help [COMMAND]`
 
@@ -86,7 +104,7 @@ EXAMPLES
   $ vibechecker login
 ```
 
-_See code: [src/commands/login.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/login.ts)_
+_See code: [src/commands/login.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.1.0/src/commands/login.ts)_
 
 ## `vibechecker logout`
 
@@ -111,7 +129,7 @@ EXAMPLES
   $ vibechecker logout --this-device
 ```
 
-_See code: [src/commands/logout.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/logout.ts)_
+_See code: [src/commands/logout.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.1.0/src/commands/logout.ts)_
 
 ## `vibechecker map [FILE]`
 
@@ -136,7 +154,7 @@ EXAMPLES
   $ vibechecker map
 ```
 
-_See code: [src/commands/map.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.0.0/src/commands/map.ts)_
+_See code: [src/commands/map.ts](https://github.com/Stover-Distributed-Systems-Incorporated/vibe_checker_cli/blob/v0.1.0/src/commands/map.ts)_
 
 ## `vibechecker plugins`
 

@@ -6,8 +6,11 @@
 /tmp
 /node_modules
 oclif.manifest.json
+tsconfig.tsbuildinfo
 
-
+# Per-project state and debug output written by the CLI at runtime
+.vibe-checker
+.vibe-checker.debug.json
 
 yarn.lock
 pnpm-lock.yaml

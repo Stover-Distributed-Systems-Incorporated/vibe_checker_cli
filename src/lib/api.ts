@@ -106,8 +106,8 @@ export async function logoutSession(
 
 const REFRESH_SKEW_MS = 30_000
 const LOCK_FILE = '.refresh.lock'
-const LOCK_TTL_MS = 5_000   // a lock older than this is considered stale
-const LOCK_WAIT_MS = 3_000  // how long we'll wait before giving up on the lock
+const LOCK_TTL_MS = 5000   // a lock older than this is considered stale
+const LOCK_WAIT_MS = 3000  // how long we'll wait before giving up on the lock
 const LOCK_POLL_MS = 100
 
 /**
@@ -123,6 +123,9 @@ async function withRefreshLock<T>(configDir: string, fn: () => Promise<T>): Prom
   const lockPath = join(configDir, LOCK_FILE)
   const deadline = Date.now() + LOCK_WAIT_MS
 
+  // This is a sequential lock-polling retry loop: each attempt must complete
+  // before the next, so awaiting inside the loop is intentional here.
+  /* eslint-disable no-await-in-loop */
   for (;;) {
     try {
       // 'wx' = O_WRONLY | O_CREAT | O_EXCL — atomic, fails if the file already exists.
@@ -133,9 +136,9 @@ async function withRefreshLock<T>(configDir: string, fn: () => Promise<T>): Prom
         await fd.close()
         await rm(lockPath, {force: true})
       }
-    } catch (err: unknown) {
-      const code = err instanceof Object && 'code' in err ? (err as NodeJS.ErrnoException).code : undefined
-      if (code !== 'EEXIST') throw err
+    } catch (error: unknown) {
+      const code = error instanceof Object && 'code' in error ? (error as NodeJS.ErrnoException).code : undefined
+      if (code !== 'EEXIST') throw error
 
       // Lock file exists — clear it if stale so we don't deadlock after a crash.
       try {
@@ -150,9 +153,12 @@ async function withRefreshLock<T>(configDir: string, fn: () => Promise<T>): Prom
         throw new Error('Token refresh lock timed out — another process may be hung.')
       }
 
-      await new Promise<void>((resolve) => setTimeout(resolve, LOCK_POLL_MS))
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, LOCK_POLL_MS)
+      })
     }
   }
+  /* eslint-enable no-await-in-loop */
 }
 
 /**
