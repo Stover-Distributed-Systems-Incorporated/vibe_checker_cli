@@ -1,11 +1,19 @@
 import {execFile} from 'node:child_process'
+import {createHash} from 'node:crypto'
 import {readdir, readFile, stat} from 'node:fs/promises'
 import {extname, join, relative, sep} from 'node:path'
 
 export interface SourceFile {
   content: string
+  /** sha256 hex of `content` — the cache key the API uses to skip re-mapping unchanged files. */
+  contentHash: string
   /** Path relative to the walked root (POSIX separators), used as the module's file_name. */
   fileName: string
+}
+
+/** sha256 hex digest of the exact text we upload, so an unchanged file always hits the cache. */
+export function sha256(data: string): string {
+  return createHash('sha256').update(data, 'utf8').digest('hex')
 }
 
 /** A locally-discovered source file whose contents have not been read yet. */
@@ -269,7 +277,8 @@ export async function readSourceFileCandidates(
         continue
       }
 
-      files.push({content: buffer.toString('utf8'), fileName: candidate.fileName})
+      const content = buffer.toString('utf8')
+      files.push({content, contentHash: sha256(content), fileName: candidate.fileName})
     } catch {
       skipped.push({path: candidate.fileName, reason: 'unreadable or missing'})
     }
@@ -329,7 +338,8 @@ export async function collectSourceFiles(rootDir: string, options: CollectOption
         continue
       }
 
-      files.push({content: buffer.toString('utf8'), fileName: rel})
+      const content = buffer.toString('utf8')
+      files.push({content, contentHash: sha256(content), fileName: rel})
     }
     /* eslint-enable no-await-in-loop */
   }

@@ -3,6 +3,8 @@ import {readFile, writeFile} from 'node:fs/promises'
 import {dirname, join} from 'node:path'
 
 export interface VibeConfig {
+  /** Informational: the HEAD sha of the most recent map run, when mapped inside a git repo. */
+  lastMappedSha?: null | string
   model: string
   projectId: string
   projectName: string

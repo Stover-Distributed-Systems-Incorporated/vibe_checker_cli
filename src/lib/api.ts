@@ -20,10 +20,21 @@ export interface Project {
   name: string
 }
 
+/** The repo's git state at map time. All fields optional/nullable so a non-git map still works. */
+export interface GitInfo {
+  branch: null | string
+  dirty: boolean
+  sha: null | string
+}
+
 export interface ImportMapSummary {
   created_functions: number
   created_modules: number
   modules: Array<{functions: Array<{function_doc_id: string; name: string}>; module_id: string; name: string}>
+  /** Files served from the content-hash cache instead of re-mapping (when a hash was sent). */
+  reused_count?: number
+  /** Id of the snapshot frozen for this map run, present only when a git sha was sent. */
+  snapshot_id?: string
   updated_functions: number
   updated_modules: number
 }
@@ -233,13 +244,15 @@ export async function importMap(
 export async function mapFile(
   baseUrl: string,
   configDir: string,
-  params: {fileContent: string; fileName: string; projectId: string},
+  params: {contentHash?: string; fileContent: string; fileName: string; git?: GitInfo; projectId: string},
 ): Promise<ImportMapSummary> {
   const token = await ensureAccessToken(baseUrl, configDir)
   return request<ImportMapSummary>(baseUrl, '/project/map-file', {
     body: {
+      content_hash: params.contentHash,
       file_content: params.fileContent,
       file_name: params.fileName,
+      git: params.git,
       project_id: params.projectId,
     },
     method: 'POST',
@@ -251,12 +264,13 @@ export async function mapFile(
 export async function mapFiles(
   baseUrl: string,
   configDir: string,
-  params: {files: Array<{content: string; fileName: string}>; projectId: string},
+  params: {files: Array<{content: string; contentHash?: string; fileName: string}>; git?: GitInfo; projectId: string},
 ): Promise<MapFilesSummary> {
   const token = await ensureAccessToken(baseUrl, configDir)
   return request<MapFilesSummary>(baseUrl, '/project/map-files', {
     body: {
-      files: params.files.map((f) => ({file_content: f.content, file_name: f.fileName})),
+      files: params.files.map((f) => ({content_hash: f.contentHash, file_content: f.content, file_name: f.fileName})),
+      git: params.git,
       project_id: params.projectId,
     },
     method: 'POST',

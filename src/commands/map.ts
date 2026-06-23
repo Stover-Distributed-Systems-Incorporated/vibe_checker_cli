@@ -11,8 +11,10 @@ import {getBaseUrl} from '../lib/config.js'
 import {
   collectSourceFileCandidates,
   readSourceFileCandidates,
+  sha256,
   type SourceFile,
 } from '../lib/files.js'
+import {type GitCoordinate, readGitCoordinate} from '../lib/git.js'
 import {type EngineModel, selectProjectFiles} from '../lib/opencode.js'
 import {findVibeConfig, readVibeConfig, writeVibeConfig} from '../lib/vibeconfig.js'
 
@@ -20,6 +22,7 @@ import {findVibeConfig, readVibeConfig, writeVibeConfig} from '../lib/vibeconfig
 interface MapContext {
   baseUrl: string
   configDir: string
+  git: GitCoordinate
   projectId: string
   projectName: string
 }
@@ -40,6 +43,10 @@ export default class Map extends Command {
 
     const baseUrl = getBaseUrl()
     const {configDir} = this.config
+
+    // Resolve the repo's git state once so the API can anchor a snapshot to this commit
+    // and skip re-mapping unchanged files. All-null outside a git repo — mapping still works.
+    const git = await readGitCoordinate(process.cwd())
 
     // Fail fast if the user isn't authenticated.
     try {
@@ -72,18 +79,19 @@ export default class Map extends Command {
       projectName = resolved.projectName
 
       const written = await writeVibeConfig(rootDir, {
+        lastMappedSha: git.sha,
         model: 'none',
         projectId,
         projectName,
         providerId: 'none',
         rootDir,
         updatedAt: new Date().toISOString(),
-        version: 1,
+        version: 2,
       })
       this.log(`Saved project settings to ${written}.`)
     }
 
-    const ctx: MapContext = {baseUrl, configDir, projectId, projectName}
+    const ctx: MapContext = {baseUrl, configDir, git, projectId, projectName}
     if (file) {
       await (isDirectory ? this.mapDirectory(ctx, targetPath!) : this.mapSingleFile(ctx, file, targetPath!))
     } else {
@@ -93,13 +101,14 @@ export default class Map extends Command {
     // Refresh the timestamp on a subsequent run.
     if (existingPath) {
       await writeVibeConfig(rootDir, {
+        lastMappedSha: git.sha,
         model: 'none',
         projectId,
         projectName,
         providerId: 'none',
         rootDir,
         updatedAt: new Date().toISOString(),
-        version: 1,
+        version: 2,
       })
     }
   }
@@ -168,7 +177,13 @@ export default class Map extends Command {
 
     this.log(`Mapping "${fileName}" into project "${ctx.projectName}" — analyzing with LLM…`)
     try {
-      const summary = await mapFile(ctx.baseUrl, ctx.configDir, {fileContent, fileName, projectId: ctx.projectId})
+      const summary = await mapFile(ctx.baseUrl, ctx.configDir, {
+        contentHash: sha256(fileContent),
+        fileContent,
+        fileName,
+        git: ctx.git,
+        projectId: ctx.projectId,
+      })
       this.log(
         `Done. Modules: +${summary.created_modules} new, ${summary.updated_modules} updated. ` +
           `Functions: +${summary.created_functions} new, ${summary.updated_functions} updated.`,
@@ -187,7 +202,7 @@ export default class Map extends Command {
 
     let summary: MapFilesSummary
     try {
-      summary = await mapFiles(ctx.baseUrl, ctx.configDir, {files, projectId: ctx.projectId})
+      summary = await mapFiles(ctx.baseUrl, ctx.configDir, {files, git: ctx.git, projectId: ctx.projectId})
     } catch (error) {
       this.error(error instanceof Error ? error.message : 'Mapping failed.')
     }
@@ -197,6 +212,12 @@ export default class Map extends Command {
         `Modules: +${summary.created_modules} new, ${summary.updated_modules} updated. ` +
         `Functions: +${summary.created_functions} new, ${summary.updated_functions} updated.`,
     )
+
+    if (summary.reused_count) {
+      this.log(
+        `${summary.reused_count} unchanged file${summary.reused_count === 1 ? '' : 's'} reused from cache (no LLM cost).`,
+      )
+    }
 
     if (summary.failed_count > 0) {
       this.log(`${summary.failed_count} file${summary.failed_count === 1 ? '' : 's'} failed to map:`)
