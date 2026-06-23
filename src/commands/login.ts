@@ -11,6 +11,9 @@ export default class Login extends Command {
   static examples = ['<%= config.bin %> <%= command.id %>']
 
   async run(): Promise<void> {
+    // Parse (no args/flags) so oclif doesn't warn that the command went unparsed.
+    await this.parse(Login)
+
     const identifier = await input({message: 'Username or email:'})
     const pwd = await password({mask: true, message: 'Password:'})
 
