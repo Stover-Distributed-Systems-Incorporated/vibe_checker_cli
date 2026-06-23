@@ -211,6 +211,16 @@ export async function listProjects(baseUrl: string, configDir: string): Promise<
   return request<Project[]>(baseUrl, '/projects', {token})
 }
 
+/**
+ * The authenticated user's plan ('free' | 'pro'). Used to decide whether to run OpenCode
+ * file selection on our hosted model or prompt for the user's own provider credentials.
+ */
+export async function getUserPlan(baseUrl: string, configDir: string): Promise<string> {
+  const token = await ensureAccessToken(baseUrl, configDir)
+  const data = await request<{plan?: string}>(baseUrl, '/user/profile', {token})
+  return data.plan ?? 'free'
+}
+
 /** Create a new project and return its id. */
 export async function createProject(
   baseUrl: string,

@@ -41,9 +41,17 @@ export interface CrawlOptions {
 
 export interface EngineModel {
   apiKey: string
+  // Custom OpenAI-compatible base URL (our Pro inference proxy). When set, OpenCode
+  // routes the model through this endpoint instead of a built-in provider.
+  baseURL?: string
   modelID: string
   providerID: string
 }
+
+// Derive the server config + provider-entry types straight from the SDK so our object
+// matches what createOpencode expects (no import-name guessing, no casts).
+type ServerConfig = NonNullable<NonNullable<Parameters<typeof createOpencode>[0]>['config']>
+type ServerProviderConfig = NonNullable<ServerConfig['provider']>[string]
 
 export interface FileSelection {
   files: string[]
@@ -135,10 +143,21 @@ const MANIFEST_ONLY_TOOLS = {
 
 type MessageError = {data?: Record<string, unknown>; name?: string}
 
-function buildServerConfig(providerID: string, apiKey: string, verbose: boolean) {
-  const config: {logLevel?: 'DEBUG' | 'ERROR' | 'INFO' | 'WARN'; provider: Record<string, {options: {apiKey: string}}>} = {
-    provider: {[providerID]: {options: {apiKey}}},
+function buildServerConfig(
+  opts: {apiKey: string; baseURL?: string; modelID?: string; providerID: string},
+  verbose: boolean,
+): ServerConfig {
+  const {apiKey, baseURL, modelID, providerID} = opts
+  // A baseURL means a custom OpenAI-compatible endpoint (our Pro inference proxy):
+  // register it as a provider so OpenCode routes the configured model through it.
+  const providerEntry: ServerProviderConfig = {options: baseURL ? {apiKey, baseURL} : {apiKey}}
+  if (baseURL) {
+    providerEntry.npm = '@ai-sdk/openai-compatible'
+    providerEntry.name = 'Vibe Checker'
+    if (modelID) providerEntry.models = {[modelID]: {name: modelID}}
   }
+
+  const config: ServerConfig = {provider: {[providerID]: providerEntry}}
   if (verbose) config.logLevel = 'DEBUG'
   return config
 }
@@ -336,7 +355,7 @@ function parseFileSelection(text: string): FileSelection {
  * list, and return a simplified list of providers (name, id, models[]).
  */
 export async function listProviders(providerID: string, apiKey: string): Promise<ProviderInfo[]> {
-  const {client, close} = await startManagedOpenCode(buildServerConfig(providerID, apiKey, false))
+  const {client, close} = await startManagedOpenCode(buildServerConfig({apiKey, providerID}, false))
   try {
     const result = await client.provider.list()
     const all = result.data?.all ?? []
@@ -364,10 +383,10 @@ export async function selectProjectFiles(
   candidates: SourceFileCandidate[],
   options: CrawlOptions = {},
 ): Promise<FileSelection> {
-  const {apiKey, modelID, providerID} = model
+  const {modelID, providerID} = model
   const verbose = options.verbose ?? false
   const log: Logger = options.log ?? (() => {})
-  const {client, close} = await startManagedOpenCode(buildServerConfig(providerID, apiKey, verbose))
+  const {client, close} = await startManagedOpenCode(buildServerConfig(model, verbose))
 
   try {
     const created = await client.session.create({body: {title: 'vibechecker select files'}, query: {directory: rootDir}})
@@ -409,12 +428,12 @@ export async function selectProjectFiles(
  * and, on a crash, includes the cause chain plus a tail of the OpenCode server log.
  */
 export async function crawlProject(rootDir: string, model: EngineModel, options: CrawlOptions = {}): Promise<ProjectMap> {
-  const {apiKey, modelID, providerID} = model
+  const {modelID, providerID} = model
   const verbose = options.verbose ?? false
   const log: Logger = options.log ?? (() => {})
 
   const logOffset = verbose ? await logSize() : 0
-  const {client, close, url} = await startManagedOpenCode(buildServerConfig(providerID, apiKey, verbose))
+  const {client, close, url} = await startManagedOpenCode(buildServerConfig(model, verbose))
   if (verbose) log(`OpenCode server listening on ${url}`)
 
   // Subscribe to the event stream so we can narrate progress and capture the real failure.
