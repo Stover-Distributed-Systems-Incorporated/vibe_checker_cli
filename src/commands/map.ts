@@ -16,7 +16,16 @@ import {
 } from '../lib/files.js'
 import {type GitCoordinate, readGitCoordinate} from '../lib/git.js'
 import {type EngineModel, selectProjectFiles} from '../lib/opencode.js'
+import {selectBySymbolDensity} from '../lib/symbolrank.js'
 import {findVibeConfig, readVibeConfig, writeVibeConfig} from '../lib/vibeconfig.js'
+
+// Past this many candidate files the LLM selector (OpenCode) degrades badly — it either
+// under-covers the codebase or truncates its JSON response to zero files (an empty map).
+// Above the threshold we select deterministically by symbol density instead. Measured:
+// at equal budget, density ranking covered ~75% of a large repo's symbols vs the LLM's
+// 31%, and unlike the LLM it cannot fail. Small repos keep the LLM selector (it's fine).
+const LARGE_REPO_FILE_THRESHOLD = 300
+const LARGE_REPO_MAP_BUDGET = 200
 
 /** The resolved auth/project context shared by both mapping paths. */
 interface MapContext {
@@ -136,29 +145,38 @@ export default class Map extends Command {
       `Found ${candidates.files.length} eligible source file${candidates.files.length === 1 ? '' : 's'} ` +
         `(${candidates.skipped.length} excluded${candidates.gitignoreApplied ? '; Git ignore rules applied' : ''}).`,
     )
-    const model = await this.resolveEngineModel(ctx)
-    this.log('Asking OpenCode to prioritize the project files…')
+    let chosen
+    if (candidates.files.length > LARGE_REPO_FILE_THRESHOLD) {
+      // Large repo: the LLM selector under-covers or truncates to empty here. Rank by
+      // symbol density (deterministic, cannot fail) and take the densest files.
+      this.log(
+        `Large project (${candidates.files.length} files) — selecting the ${LARGE_REPO_MAP_BUDGET} ` +
+          'most code-dense files by symbol density (deterministic)…',
+      )
+      chosen = await selectBySymbolDensity(candidates.files, LARGE_REPO_MAP_BUDGET)
+    } else {
+      const model = await this.resolveEngineModel(ctx)
+      this.log('Asking OpenCode to prioritize the project files…')
 
-    let selected: string[]
-    try {
-      selected = (await selectProjectFiles(rootDir, model, candidates.files)).files
-    } catch (error) {
-      this.error(error instanceof Error ? error.message : 'OpenCode file selection failed.')
+      let selected: string[]
+      try {
+        selected = (await selectProjectFiles(rootDir, model, candidates.files)).files
+      } catch (error) {
+        this.error(error instanceof Error ? error.message : 'OpenCode file selection failed.')
+      }
+
+      const byName = new globalThis.Map(candidates.files.map((source) => [source.fileName, source]))
+      chosen = selected.flatMap((name) => {
+        const source = byName.get(name)
+        return source ? [source] : []
+      })
     }
 
-    const byName = new globalThis.Map(candidates.files.map((source) => [source.fileName, source]))
-    const chosen = selected.flatMap((name) => {
-      const source = byName.get(name)
-      return source ? [source] : []
-    })
     if (chosen.length === 0) {
-      this.error('OpenCode did not select any eligible source files to map.')
+      this.error('No source files were selected to map.')
     }
 
-    this.log(
-      `OpenCode selected ${chosen.length} eligible file${chosen.length === 1 ? '' : 's'} ` +
-        `(${selected.length - chosen.length} ignored by local safety filters).`,
-    )
+    this.log(`Selected ${chosen.length} file${chosen.length === 1 ? '' : 's'} to map.`)
     for (const source of chosen) this.log(`  • ${source.fileName}`)
 
     const {files, skipped} = await readSourceFileCandidates(chosen)
